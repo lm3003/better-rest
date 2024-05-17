@@ -7,51 +7,74 @@
 
 import SwiftUI
 import SwiftData
+import CoreML
 
 struct ContentView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
+    @State private var wakeUpTime = defaultWakeTime
+    @State private var coffeeCups = 1
+    @State private var sleepTime = 8.0
+    @State private var alertTitle = ""
+    @State private var alertMessage = ""
+    @State private var showAlert = false
 
+    static private var defaultWakeTime: Date {
+        var component = DateComponents()
+        component.hour = 7
+        component.minute = 0
+        return Calendar.current.date(from: component) ?? .now
+    }
     var body: some View {
-        NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
-                    }
+        NavigationStack {
+            Form {
+                VStack (alignment: .leading, spacing: 0) {
+                    Text("At what time do you wake up?")
+                        .font(.headline)
+                    
+                    DatePicker("Preferred time", selection: $wakeUpTime, displayedComponents: .hourAndMinute)
+                        .labelsHidden()
                 }
-                .onDelete(perform: deleteItems)
+                
+                VStack (alignment: .leading, spacing: 0) {
+                    Text("Desired amount of sleep")
+                        .font(.headline)
+                    
+                    Stepper("\(sleepTime.formatted()) hours", value: $sleepTime, in: 4...12, step: 0.25)
+                }
+                
+                VStack (alignment: .leading, spacing: 0) {
+                    Text("Daily coffee intake")
+                        .font(.headline)
+                    Stepper("^[\(coffeeCups) cup](inflect: true)", value: $coffeeCups, in: 1...20)
+                }
             }
+            .navigationTitle("BetterRest")
             .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
-                }
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
-                }
+                Button("Calculate", action: calcBedTime)
             }
-        } detail: {
-            Text("Select an item")
-        }
-    }
-
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
-        }
-    }
-
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
+            .alert(alertTitle, isPresented: $showAlert) {
+                Button("OK") { }
+            } message: {
+                Text(alertMessage)
             }
         }
+    }
+    
+    func calcBedTime() {
+        let config = MLModelConfiguration()
+        do {
+            let sleepCalc = try SleepCalculator(configuration: config)
+            let wakeTimeComponents = Calendar.current.dateComponents([.hour, .minute], from: wakeUpTime)
+            let hour = (wakeTimeComponents.hour ?? 0) * 60 * 60
+            let minute = (wakeTimeComponents.minute ?? 0) * 60
+            let prediction = try sleepCalc.prediction(wake: Double(hour + minute), estimatedSleep: sleepTime, coffee: Double(coffeeCups))
+            let sleepTime = wakeUpTime - prediction.actualSleep
+            alertTitle = "Your sleep time is ..."
+            alertMessage = sleepTime.formatted(date: .omitted, time: .shortened)
+        } catch {
+            alertTitle = "Error Occurred"
+            alertMessage = "Some issue occurred while trying to calc your sleep time"
+        }
+        showAlert = true
     }
 }
 
